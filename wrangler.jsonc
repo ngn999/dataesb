@@ -10,7 +10,7 @@
     // Environment variables for API configuration
     "vars": {
         "API_BASE_URL": "https://b.dataesb.com",
-        "BOOK_ID": "2007176121",
+        "BOOK_ID": "2007176120",
         "LIBRARY_CODE": "2700",
         // Default values - override with secrets for production
         "TELEGRAM_BOT_TOKEN": "8600309300:AAHKAKx5XMouAuRFjxrg55heVU-4-ZQvOzk",
