@@ -1,0 +1,36 @@
+{
+    "$schema": "./node_modules/wrangler/config-schema.json",
+    "name": "dataesb-book-checker",
+    "main": "src/index.ts",
+    "compatibility_date": "2026-04-06",
+    "compatibility_flags": [
+        "nodejs_compat"
+    ],
+    "account_id": "ca772b67173a16e40d2e2c9d41e6005d",
+    // Environment variables for API configuration
+    "vars": {
+        "API_BASE_URL": "https://b.dataesb.com",
+        "BOOK_ID": "2007176121",
+        "LIBRARY_CODE": "2700",
+        // Default values - override with secrets for production
+        "TELEGRAM_BOT_TOKEN": "8600309300:AAHKAKx5XMouAuRFjxrg55heVU-4-ZQvOzk",
+        "TELEGRAM_CHAT_ID": "156195261"
+    },
+    // Cron triggers - every 10 minutes
+    "triggers": {
+        "crons": [
+            "*/10 * * * *"
+        ]
+    },
+    // Observability for logging
+    "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+    },
+    // KV namespace for storing previous book status (auto-provisioned)
+    "kv_namespaces": [
+        {
+            "binding": "BOOK_STATUS_STORE"
+        }
+    ]
+}
