@@ -5,12 +5,17 @@ export interface Env {
   LIBRARY_CODE: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
+  // Token generation parameters
+  DATAESB_TOKEN: string;
+  DATAESB_OPENID: string;
+  DATAESB_SECRET: string;
   
   // Secret from .dev.vars or wrangler secret put
   AUTH_TOKEN: string;
   
-  // KV namespace for storing previous book status
+  // KV namespaces for storing data
   BOOK_STATUS_STORE: KVNamespace;
+  AUTH_TOKEN_STORE: KVNamespace;
 }
 
 interface BookDetailsResponse {
@@ -50,18 +55,42 @@ interface BookDetailsResponse {
 
 // Import Telegram functions
 import { sendTelegramMessage, sendBookAvailabilityAlert, TelegramConfig } from './telegram';
+// Import token utilities
+import { getAuthToken, isTokenExpired } from './token-utils';
 
 /**
- * Fetch book details from the API
+ * Fetch book details from the API with automatic token refresh
  */
 async function fetchBookDetails(env: Env): Promise<BookDetailsResponse> {
   const url = `${env.API_BASE_URL}/api/v1/books/details/${env.BOOK_ID}?curlibcode=${env.LIBRARY_CODE}`;
-  
   console.log(`Fetching book details from: ${url}`);
+  
+  // Try to get auth token (dynamic refresh or static)
+  let authToken = env.AUTH_TOKEN;
+  
+  // If we have token generation parameters, try to get a fresh token
+  if (env.DATAESB_TOKEN && env.DATAESB_OPENID && env.DATAESB_SECRET) {
+    const dynamicToken = await getAuthToken({
+      AUTH_TOKEN: env.AUTH_TOKEN,
+      DATAESB_TOKEN: env.DATAESB_TOKEN,
+      DATAESB_OPENID: env.DATAESB_OPENID,
+      DATAESB_SECRET: env.DATAESB_SECRET,
+      AUTH_TOKEN_STORE: env.AUTH_TOKEN_STORE,
+    });
+    
+    if (dynamicToken) {
+      authToken = dynamicToken;
+      console.log('Using dynamically fetched auth token');
+    } else {
+      console.log('Failed to get dynamic token, using static token');
+    }
+  } else {
+    console.log('Using static auth token from environment');
+  }
   
   const headers = {
     'accept': 'application/json',
-    'authorization': `Bearer ${env.AUTH_TOKEN}`,
+    'authorization': `Bearer ${authToken}`,
     'accept-language': 'zh-CN',
     'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.70(0x18004631) NetType/WIFI Language/ja',
     'priority': 'u=3, i',
@@ -77,6 +106,52 @@ async function fetchBookDetails(env: Env): Promise<BookDetailsResponse> {
       },
     });
 
+    // Handle authentication errors
+    if (response.status === 401 || response.status === 403) {
+      console.log(`Auth token expired or invalid (${response.status}), attempting token refresh...`);
+      
+      // Clear stored token if it exists
+      if (env.AUTH_TOKEN_STORE) {
+        await env.AUTH_TOKEN_STORE.delete('dataesb_auth_token');
+        await env.AUTH_TOKEN_STORE.delete('dataesb_auth_token_expiry');
+      }
+      
+      // Try once more with a fresh token if we have config
+      if (env.DATAESB_TOKEN && env.DATAESB_OPENID && env.DATAESB_SECRET) {
+        console.log('Retrying with fresh token...');
+        const dynamicToken = await getAuthToken({
+          DATAESB_TOKEN: env.DATAESB_TOKEN,
+          DATAESB_OPENID: env.DATAESB_OPENID,
+          DATAESB_SECRET: env.DATAESB_SECRET,
+          AUTH_TOKEN_STORE: env.AUTH_TOKEN_STORE,
+        });
+        
+        if (dynamicToken) {
+          headers.authorization = `Bearer ${dynamicToken}`;
+          const retryResponse = await fetch(url, { headers });
+          
+          if (!retryResponse.ok) {
+            console.error(`Retry failed with status: ${retryResponse.status}`);
+            return {
+              status: 'error',
+              code: retryResponse.status,
+              message: `API request failed with status: ${retryResponse.status} (after token refresh)`,
+            };
+          }
+          
+          const data = await retryResponse.json() as BookDetailsResponse;
+          console.log(`Successfully fetched book details after token refresh`);
+          return data;
+        }
+      }
+      
+      return {
+        status: 'error',
+        code: response.status,
+        message: `Authentication failed. Token may have expired. Please check your credentials.`,
+      };
+    }
+
     if (!response.ok) {
       console.error(`API request failed with status: ${response.status}`);
       return {
@@ -86,7 +161,7 @@ async function fetchBookDetails(env: Env): Promise<BookDetailsResponse> {
       };
     }
 
-    const data = await response.json();
+    const data = await response.json() as BookDetailsResponse;
     console.log(`Successfully fetched book details`);
     return data;
   } catch (error) {
