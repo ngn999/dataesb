@@ -4,24 +4,25 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-04-06",
   "compatibility_flags": ["nodejs_compat"],
+  "account_id": "ca772b67173a16e40d2e2c9d41e6005d",
   
   // Environment variables for API configuration
   "vars": {
     "API_BASE_URL": "https://b.dataesb.com",
-    "BOOK_ID": "2007176121",
+    "BOOK_ID": "2007176120",
     "LIBRARY_CODE": "2700",
     // Telegram configuration
     "TELEGRAM_BOT_TOKEN": "8600309300:AAHKAKx5XMouAuRFjxrg55heVU-4-ZQvOzk",
     "TELEGRAM_CHAT_ID": "156195261",
     // Token generation parameters (optional - for auto-refresh)
-    "DATAESB_TOKEN": "",
-    "DATAESB_OPENID": "",
-    "DATAESB_SECRET": ""
+    "DATAESB_TOKEN": "c65b777e8fea",
+    "DATAESB_OPENID": "omLAR58PwCSz55nLxMmSjAHkkagk",
+    "DATAESB_SECRET": "TCUWEI2018"
   },
 
-  // Cron triggers - every 10 minutes
+  // Cron triggers - every 10 minutes during UTC 00:00-13:00 (Beijing 08:00-21:00)
   "triggers": {
-    "crons": ["*/10 * * * *"]
+    "crons": ["*/10 0-13 * * *"]
   },
 
   // Observability for logging
