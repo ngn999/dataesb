@@ -22,7 +22,7 @@
 
   // Cron triggers - every 10 minutes during UTC 00:00-13:00 (Beijing 08:00-21:00)
   "triggers": {
-    "crons": ["*/10 0-12 * * *"]
+    "crons": ["*/10 1-12 * * *"]
   },
 
   // Observability for logging
