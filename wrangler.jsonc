@@ -20,7 +20,7 @@
     "DATAESB_SECRET": "TCUWEI2018"
   },
 
-  // Cron triggers - every 10 minutes during UTC 00:00-13:00 (Beijing 08:00-21:00)
+  // Cron triggers - every 10 minutes during UTC 01:00-12:00 (Beijing 09:00-20:00)
   "triggers": {
     "crons": ["*/10 1-12 * * *"]
   },

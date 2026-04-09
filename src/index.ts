@@ -277,10 +277,13 @@ async function notifyIfBooksAvailable(
   env: Env,
   bookDetails: BookDetailsResponse,
   currentSummary: BookAvailabilitySummary
-): Promise<void> {
-  if (!currentSummary || currentSummary.availableCopies === 0) {
-    console.log('No books available, skipping notification');
-    return;
+): Promise<{ sentNotification: boolean; wasPreviouslyUnavailable: boolean }> {
+  // Initialize result
+  const result = { sentNotification: false, wasPreviouslyUnavailable: false };
+  
+  if (!currentSummary) {
+    console.log('No summary available, skipping notification check');
+    return result;
   }
 
   // Check if Telegram is configured
@@ -288,7 +291,7 @@ async function notifyIfBooksAvailable(
       env.TELEGRAM_BOT_TOKEN === 'your-telegram-bot-token-here' || 
       env.TELEGRAM_CHAT_ID === 'your-telegram-chat-id-here') {
     console.log('Telegram bot not configured. Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.');
-    return;
+    return result;
   }
 
   const { details } = bookDetails.data!;
@@ -305,40 +308,57 @@ async function notifyIfBooksAvailable(
   if (previousStatus) {
     const previousSummary = JSON.parse(previousStatus) as BookAvailabilitySummary;
     wasPreviouslyUnavailable = previousSummary.availableCopies === 0 && currentSummary.availableCopies > 0;
+    result.wasPreviouslyUnavailable = wasPreviouslyUnavailable;
     
     if (wasPreviouslyUnavailable) {
-      console.log('Book status changed from unavailable to available! Sending alert.');
+      console.log(`📢 Book availability changed: ${previousSummary.availableCopies} → ${currentSummary.availableCopies} copies available!`);
     }
   }
 
-  // Send notification for each library with available books
-  for (const library of currentSummary.libraries) {
-    if (library.available > 0) {
-      // Find the first call number for this library
-      const callNumber = library.callNumbers[0] || 'Unknown';
-      
-      const notificationSent = await sendBookAvailabilityAlert(
-        telegramConfig,
-        details.title,
-        details.author,
-        library.name,
-        callNumber,
-        library.available,
-        wasPreviouslyUnavailable
-      );
+  // ONLY send notification when: availableCopies > 0 AND was previously unavailable
+  if (currentSummary.availableCopies > 0 && wasPreviouslyUnavailable) {
+    console.log(`Sending Telegram alert: ${currentSummary.availableCopies} copies now available!`);
+    
+    // Send notification for each library with available books
+    let totalNotificationsSent = 0;
+    for (const library of currentSummary.libraries) {
+      if (library.available > 0) {
+        // Find the first call number for this library
+        const callNumber = library.callNumbers[0] || 'Unknown';
+        
+        const notificationSent = await sendBookAvailabilityAlert(
+          telegramConfig,
+          details.title,
+          details.author,
+          library.name,
+          callNumber,
+          library.available,
+          wasPreviouslyUnavailable
+        );
 
-      if (notificationSent) {
-        console.log(`Notification sent for ${library.name}: ${library.available} copies available`);
-      } else {
-        console.error(`Failed to send notification for ${library.name}`);
+        if (notificationSent) {
+          console.log(`✅ Notification sent for ${library.name}: ${library.available} copies available`);
+          totalNotificationsSent++;
+        } else {
+          console.error(`❌ Failed to send notification for ${library.name}`);
+        }
       }
     }
+    
+    result.sentNotification = totalNotificationsSent > 0;
+    
+  } else if (currentSummary.availableCopies > 0) {
+    console.log(`📚 Books available (${currentSummary.availableCopies} copies), but no status change detected.`);
+  } else {
+    console.log(`⏳ No books available (${currentSummary.availableCopies} copies), skipping notification.`);
   }
 
-  // Store current status for next check
+  // Always store current status for tracking changes
   await env.BOOK_STATUS_STORE.put(previousStatusKey, JSON.stringify(currentSummary), {
     expirationTtl: 86400, // Store for 24 hours
   });
+
+  return result;
 }
 
 /**
@@ -373,7 +393,7 @@ async function handleScheduled(event: ScheduledController, env: Env, ctx: Execut
   if (bookDetails.status === 'error') {
     console.error(`Failed to fetch book details: ${bookDetails.message}`);
     
-    // Send error notification to Telegram
+    // Send error notification to Telegram (errors are always important)
     const errorMessage = `❌ Book check failed at ${new Date().toLocaleString()}\nError: ${bookDetails.message}`;
     await sendSummaryToTelegram(env, errorMessage);
     return;
@@ -389,13 +409,24 @@ async function handleScheduled(event: ScheduledController, env: Env, ctx: Execut
   const formattedMessage = formatBookDetails(bookDetails, summary);
   console.log(formattedMessage);
   
-  // Check and send Telegram notifications if books are available
-  await notifyIfBooksAvailable(env, bookDetails, summary);
+  // Check and send Telegram notifications if books become available
+  const notificationResult = await notifyIfBooksAvailable(env, bookDetails, summary);
   
-  // Send summary to Telegram for logging (only if configured)
-  const timestamp = new Date().toLocaleString();
-  const summaryMessage = `📊 Book Check Summary (${timestamp})\nTotal: ${summary.totalCopies} | ✅ Available: ${summary.availableCopies} | ❌ Checked out: ${summary.checkedOutCopies}`;
-  await sendSummaryToTelegram(env, summaryMessage);
+  // Only send summary to Telegram when:
+  // 1. Books are available (availableCopies > 0), OR
+  // 2. We just sent a notification (status change detected)
+  if (summary.availableCopies > 0 || notificationResult.sentNotification) {
+    const timestamp = new Date().toLocaleString();
+    const statusEmoji = notificationResult.sentNotification ? '🎉' : '📊';
+    const changeText = notificationResult.sentNotification ? ' (NEWLY AVAILABLE!)' : '';
+    
+    const summaryMessage = `${statusEmoji} Book Check Summary (${timestamp})${changeText}\n` +
+                          `📚 ${bookDetails.data?.details.title}\n` +
+                          `📋 Status: ${summary.availableCopies} available, ${summary.checkedOutCopies} checked out`;
+    await sendSummaryToTelegram(env, summaryMessage);
+  } else {
+    console.log(`No books available (${summary.availableCopies} copies), skipping summary log.`);
+  }
 }
 
 /**
@@ -428,11 +459,21 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext) 
 
     const formattedMessage = formatBookDetails(bookDetails, summary);
     
-    // Check and send Telegram notifications if books are available
-    await notifyIfBooksAvailable(env, bookDetails, summary);
+    // Check and send Telegram notifications if books become available
+    const notificationResult = await notifyIfBooksAvailable(env, bookDetails, summary);
+    
+    // Add notification status to response for manual checks
+    let responseMessage = formattedMessage;
+    if (notificationResult.sentNotification) {
+      responseMessage += '\n\n🎉 Telegram notification sent! Books are newly available!';
+    } else if (summary.availableCopies > 0) {
+      responseMessage += '\n\n📚 Books are available, but no status change detected.';
+    } else {
+      responseMessage += '\n\n⏳ No books available right now.';
+    }
     
     // Return formatted response
-    return new Response(formattedMessage, {
+    return new Response(responseMessage, {
       headers: { 'content-type': 'text/plain; charset=utf-8' },
     });
   }
